@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEON Solidity Lab - Blockchain Simulator</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-deep: #05081a; --bg-surface: #0a0e27; --bg-elevated: #161b3d;
+            --neon-cyan: #00d4ff; --neon-purple: #7c3aed; --neon-green: #10b981;
+            --neon-orange: #f59e0b; --neon-red: #ef4444; --text-main: #e2e8f0; --text-dim: #64748b;
+        }
+
+        /* Basic Reset & Layout */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-deep); color: var(--text-main); overflow: hidden; height: 100vh; }
+        #particle-canvas { position: fixed; top: 0; left: 0; z-index: -1; pointer-events: none; }
+        
+        .page { display: none; height: 100vh; flex-direction: column; }
+        .page.active { display: flex; }
+
+        /* --- Launcher Style --- */
+        #launcher { justify-content: center; align-items: center; }
+        .launcher-grid { display: grid; grid-template-columns: repeat(1, 400px); gap: 20px; }
+        .lab-card {
+            background: var(--bg-surface); border: 1px solid var(--bg-elevated); padding: 25px; border-radius: 16px;
+            cursor: pointer; transition: 0.3s; position: relative; overflow: hidden;
+        }
+        .lab-card:hover { transform: translateY(-5px); border-color: var(--neon-cyan); box-shadow: 0 0 20px rgba(0,212,255,0.2); }
+        .progress-container { height: 6px; background: #000; border-radius: 3px; margin-top: 15px; }
+        .progress-bar { height: 100%; background: var(--neon-cyan); width: 0%; transition: 0.5s; }
+
+        /* --- IDE Layout --- */
+        .header { height: 50px; background: var(--bg-surface); border-bottom: 1px solid var(--bg-elevated); display: flex; align-items: center; padding: 0 20px; justify-content: space-between; font-size: 0.9rem; }
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        
+        /* Editor Section */
+        .editor-container { flex: 1.5; display: flex; flex-direction: column; border-right: 1px solid var(--bg-elevated); position: relative; }
+        .editor-toolbar { background: #070a1d; display: flex; padding: 0 10px; border-bottom: 1px solid var(--bg-elevated); }
+        .tab-btn { padding: 10px 15px; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 0.8rem; border-bottom: 2px solid transparent; }
+        .tab-btn.active { color: var(--neon-cyan); border-bottom-color: var(--neon-cyan); }
+        
+        .editor-wrapper { flex: 1; position: relative; display: flex; background: #050714; overflow: hidden; }
+        .line-numbers { width: 40px; padding: 20px 0; text-align: center; color: #334155; font-family: 'Fira Code', monospace; font-size: 13px; border-right: 1px solid #1e293b; line-height: 1.6; user-select: none; }
+        .code-area { flex: 1; position: relative; }
+        #code-input, #code-highlight { position: absolute; top: 0; left: 0; width: 100%; height: 100%; padding: 20px; font-family: 'Fira Code', monospace; font-size: 14px; line-height: 1.6; white-space: pre; tab-size: 4; }
+        #code-input { color: transparent; background: transparent; caret-color: white; resize: none; outline: none; z-index: 2; }
+        #code-highlight { z-index: 1; pointer-events: none; color: #94a3b8; }
+
+        /* Control & Interaction Panels */
+        .panel { width: 350px; background: var(--bg-surface); border-left: 1px solid var(--bg-elevated); display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
+        .section-label { font-size: 0.65rem; font-weight: 800; color: var(--neon-purple); letter-spacing: 1px; margin-bottom: 15px; display: block; }
+        .vm-card { background: var(--bg-deep); padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--bg-elevated); }
+        .neon-btn { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid var(--neon-cyan); background: rgba(0,212,255,0.05); color: var(--neon-cyan); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.8rem; }
+        .neon-btn:hover:not(:disabled) { background: var(--neon-cyan); color: black; box-shadow: 0 0 15px var(--neon-cyan); }
+        .neon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        /* Console */
+        .console-panel { height: 180px; background: #050714; border-top: 1px solid var(--bg-elevated); overflow-y: auto; font-family: 'Fira Code', monospace; font-size: 0.75rem; padding: 10px; transition: 0.3s; }
+        .console-panel.minimized { height: 30px; overflow: hidden; }
+        .log-item { margin-bottom: 5px; padding-left: 5px; border-left: 2px solid #334155; }
+        .log-tx { border-left-color: var(--neon-orange); color: var(--neon-orange); }
+        .log-success { border-left-color: var(--neon-green); color: var(--neon-green); }
+
+        /* Token Colors */
+        .tk-kw { color: var(--neon-cyan); font-weight: bold; }
+        .tk-type { color: var(--neon-purple); }
+        .tk-str { color: var(--neon-green); }
+        .tk-num { color: var(--neon-orange); }
+        .tk-comment { color: #64748b; font-style: italic; }
+
+        /* Toast */
+        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; }
+        .toast { background: var(--bg-elevated); border-left: 4px solid var(--neon-cyan); padding: 12px 20px; margin-bottom: 10px; border-radius: 4px; font-size: 0.85rem; transform: translateX(120%); transition: 0.3s ease; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .toast.show { transform: translateX(0); }
+
+        /* Modal */
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal.active { display: flex; }
+        .modal-content { background: var(--bg-surface); padding: 30px; border-radius: 12px; border: 1px solid var(--neon-cyan); width: 450px; }
+        kbd { background: #334155; padding: 2px 6px; border-radius: 3px; color: var(--neon-orange); font-family: 'Fira Code'; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+
+    <canvas id="particle-canvas"></canvas>
+
+    <div id="launcher" class="page active">
+        <div class="launcher-grid">
+            <div class="lab-card" onclick="Navigation.goTo('#lab1')">
+                <span style="font-size: 0.7rem; color: var(--neon-purple);">MODULE 01</span>
+                <h2 style="margin: 10px 0; color: var(--neon-cyan);">Hello Solidity</h2>
+                <p style="font-size: 0.85rem; color: var(--text-dim);">상태 변수, 가시성, 그리고 가스비의 기초를 배웁니다.</p>
+                <div class="progress-container"><div id="main-progress-bar" class="progress-bar"></div></div>
+                <div style="text-align: right; font-size: 0.7rem; margin-top: 5px;" id="progress-text">0/3 Steps Completed</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="lab1" class="page">
+        <div class="header">
+            <div><i class="fas fa-cube" style="color:var(--neon-cyan)"></i> <strong>NEON_IDE v1.0</strong></div>
+            <div id="vm-account-display" style="font-family: 'Fira Code'; color: var(--neon-cyan);">0x5B38... (100.00 ETH)</div>
+        </div>
+
+        <div class="main-container">
+            <section class="editor-container">
+                <div class="editor-toolbar">
+                    <button class="tab-btn active" onclick="LabController.switchTab(0)">Tab 1</button>
+                    <button class="tab-btn" onclick="LabController.switchTab(1)">Tab 2</button>
+                    <button class="tab-btn" onclick="LabController.switchTab(2)">Tab 3</button>
+                    <div style="margin-left: auto; display: flex; align-items: center; gap: 15px; padding-right: 15px;">
+                        <span id="cursor-pos" style="font-size: 0.7rem; color: var(--text-dim);">Ln 1, Col 1</span>
+                        <i class="far fa-copy" style="cursor:pointer;" onclick="LabController.copyCode()"></i>
+                    </div>
+                </div>
+                <div class="editor-wrapper">
+                    <div id="line-nums" class="line-numbers">1</div>
+                    <div class="code-area">
+                        <pre id="code-highlight"></pre>
+                        <textarea id="code-input" spellcheck="false"></textarea>
+                    </div>
+                </div>
+                <div id="bottom-console" class="console-panel">
+                    <div style="display:flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 5px;">
+                        <span>TERMINAL</span>
+                        <span onclick="document.getElementById('bottom-console').classList.toggle('minimized')" style="cursor:pointer;">_</span>
+                    </div>
+                    <div id="console-list"></div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <span class="section-label">ENVIRONMENT</span>
+                <div class="vm-card">
+                    <select id="acc-select" class="neon-btn" style="background: var(--bg-deep); text-align: left;" onchange="VM.selectAccount(this.selectedIndex)"></select>
+                    <div style="font-size: 0.7rem; color: var(--text-dim); display: flex; justify-content: space-between;">
+                        <span id="vm-bal">Balance: 100 ETH</span>
+                        <span id="vm-nonce">Nonce: 0</span>
+                    </div>
+                </div>
+
+                <span class="section-label">DEPLOYMENT</span>
+                <button class="neon-btn" onclick="LabController.compile()"><i class="fas fa-hammer"></i> COMPILE</button>
+                <button id="deploy-btn" class="neon-btn" style="border-color: var(--neon-green); color: var(--neon-green);" disabled onclick="LabController.deploy()">
+                    <i class="fas fa-rocket"></i> DEPLOY
+                </button>
+
+                <div id="mission-guide" style="margin-top: 10px; padding: 15px; background: rgba(124,58,237,0.1); border-radius: 8px; border-left: 3px solid var(--neon-purple); font-size: 0.8rem; line-height: 1.5;">
+                    </div>
+
+                <div id="interaction-area" style="margin-top: 20px;">
+                    <p style="color: var(--text-dim); font-size: 0.8rem; text-align: center;">컴파일 후 배포를 진행하세요.</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+    <div id="help-modal" class="modal">
+        <div class="modal-content">
+            <h3 style="color:var(--neon-cyan); margin-bottom: 15px;">Keyboard Shortcuts</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.85rem;">
+                <div><kbd>1</kbd> Lab 1 이동</div>
+                <div><kbd>Esc</kbd> 런처 복귀</div>
+                <div><kbd>Ctrl+Enter</kbd> 컴파일</div>
+                <div><kbd>Ctrl+Shift+D</kbd> 배포</div>
+                <div><kbd>Ctrl+`</kbd> 콘솔 토글</div>
+                <div><kbd>Ctrl+/</kbd> 도움말</div>
+            </div>
+            <button class="neon-btn" style="margin-top: 20px;" onclick="document.getElementById('help-modal').classList.remove('active')">CLOSE</button>
+        </div>
+    </div>
+
+    <script>
+        /* --- 1. Blockchain VM Engine --- */
+        const VM = {
+            block: 15420,
+            selectedIdx: 0,
+            accounts: [
+                { addr: '0x5B38Da6a701c568545dCfcB03FcB875f56beddC8', balance: 100.00, nonce: 0 },
+                { addr: '0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2', balance: 100.00, nonce: 0 },
+                { addr: '0x4B20993B04c152742651693c6245C6150b6503c3', balance: 100.00, nonce: 0 },
+                { addr: '0x78731D3C70E9Af14d4709A08016c7089C6edA673', balance: 100.00, nonce: 0 },
+                { addr: '0x617F2E2f41066A39143260c9F27d95d644026042', balance: 100.00, nonce: 0 }
+            ],
+            init() {
+                const sel = document.getElementById('acc-select');
+                this.accounts.forEach((acc, i) => {
+                    const opt = document.createElement('option');
+                    opt.text = `${acc.addr.substr(0,10)}... (${acc.balance} ETH)`;
+                    sel.add(opt);
+                });
+                this.updateUI();
+            },
+            selectAccount(idx) {
+                this.selectedIdx = idx;
+                this.updateUI();
+                Logger.log(`계정 전환: ${this.accounts[idx].addr}`, 'info');
+            },
+            updateUI() {
+                const acc = this.accounts[this.selectedIdx];
+                document.getElementById('vm-bal').innerText = `Balance: ${acc.balance.toFixed(4)} ETH`;
+                document.getElementById('vm-nonce').innerText = `Nonce: ${acc.nonce}`;
+                document.getElementById('vm-account-display').innerText = `${acc.addr.substr(0,6)}...${acc.addr.substr(-4)} (msg.sender)`;
+            },
+            executeTx(gasPrice = 20) {
+                const gasLimit = 21000 + Math.floor(Math.random() * 20000);
+                const cost = (gasLimit * gasPrice) / 1e9;
+                const acc = this.accounts[this.selectedIdx];
+                if(acc.balance < cost) return false;
+                acc.balance -= cost;
+                acc.nonce++;
+                this.block++;
+                this.updateUI();
+                return { gas: gasLimit, hash: '0x'+Math.random().toString(16).substr(2,32) };
+            }
+        };
+
+        /* --- 2. Solidity Fake Parser --- */
+        const Parser = {
+            storage: {},
+            parse(code) {
+                this.storage = {};
+                const result = { name: 'Contract', vars: [], funcs: [] };
+                const nameM = code.match(/contract\s+(\w+)/);
+                if(nameM) result.name = nameM[1];
+
+                const varRegex = /(string|int|uint|uint256|bool)\s+(public|private)\s+(\w+)(?:\s*=\s*([^;]+))?;/g;
+                let vM; while((vM = varRegex.exec(code))) {
+                    const val = vM[4] ? vM[4].trim().replace(/"/g, '') : "0";
+                    result.vars.push({ type: vM[1], viz: vM[2], name: vM[3], val });
+                    this.storage[vM[3]] = val;
+                }
+
+                const funcRegex = /function\s+(\w+)\s*\(([^)]*)\)\s+(public|private|external|internal)\s*(view|pure|payable)?/g;
+                let fM; while((fM = funcRegex.exec(code))) {
+                    result.funcs.push({ name: fM[1], params: fM[2], viz: fM[3], mut: fM[4] || 'nonpayable' });
+                }
+                return result;
+            }
+        };
+
+        /* --- 3. UI & Lab Controller --- */
+        const LabController = {
+            currentTab: 0,
+            tabs: [
+                { title: "HelloWorld 기본", code: "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.26;\n\ncontract HelloWorld {\n    string public greet = \"Hello World\";\n}", guide: "<b>Step 1</b>: <code>public greet</code> 변수를 확인하세요. 배포 후 자동으로 버튼이 생성됩니다." },
+                { title: "HelloWorld 확장", code: "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.26;\n\ncontract HelloWorld {\n    string private _greeting = \"Hello, Neon!\";\n\n    function greet() public view returns (string memory) {\n        return _greeting;\n    }\n\n    function setGreeting(string memory newM) public {\n        _greeting = newM;\n    }\n}", guide: "<b>Step 2</b>: <code>view</code>함수와 상태 변경 함수의 가스비 차이를 확인하세요." },
+                { title: "HelloNumber", code: "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.26;\n\ncontract HelloNumber {\n    int public number = 10;\n}", guide: "<b>Step 3</b>: 정수형 타입을 학습합니다. 도전과제를 수행해 보세요!" }
+            ],
+
+            init() {
+                const saved = localStorage.getItem('neon_lab_code_0');
+                if(saved) this.tabs[0].code = saved;
+                this.switchTab(0);
+                
+                const input = document.getElementById('code-input');
+                input.addEventListener('input', () => this.handleInput());
+                input.addEventListener('scroll', () => {
+                    document.getElementById('code-highlight').scrollTop = input.scrollTop;
+                    document.getElementById('code-highlight').scrollLeft = input.scrollLeft;
+                    document.getElementById('line-nums').scrollTop = input.scrollTop;
+                });
+                input.addEventListener('keydown', (e) => {
+                    if(e.key === 'Tab') {
+                        e.preventDefault();
+                        const start = input.selectionStart;
+                        input.value = input.value.substring(0, start) + "    " + input.value.substring(input.selectionEnd);
+                        input.selectionStart = input.selectionEnd = start + 4;
+                        this.handleInput();
+                    }
+                });
+            },
+
+            switchTab(idx) {
+                this.currentTab = idx;
+                document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
+                document.getElementById('code-input').value = localStorage.getItem(`neon_lab_code_${idx}`) || this.tabs[idx].code;
+                document.getElementById('mission-guide').innerHTML = this.tabs[idx].guide;
+                document.getElementById('deploy-btn').disabled = true;
+                document.getElementById('interaction-area').innerHTML = '<p style="color: var(--text-dim); font-size: 0.8rem; text-align: center;">컴파일을 먼저 진행하세요.</p>';
+                this.handleInput();
+            },
+
+            handleInput() {
+                const code = document.getElementById('code-input').value;
+                localStorage.setItem(`neon_lab_code_${this.currentTab}`, code);
+                
+                // Highlight
+                const html = code
+                    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                    .replace(/\/\/.*/g, '<span class="tk-comment">$&</span>')
+                    .replace(/\b(pragma|solidity|contract|function|returns|public|private|view|pure|external|internal)\b/g, '<span class="tk-kw">$&</span>')
+                    .replace(/\b(string|int|uint|uint256|bool|address)\b/g, '<span class="tk-type">$&</span>')
+                    .replace(/"[^"]*"/g, '<span class="tk-str">$&</span>')
+                    .replace(/\b\d+\b/g, '<span class="tk-num">$&</span>');
+                document.getElementById('code-highlight').innerHTML = html + "\n";
+
+                // Line nums
+                const lines = code.split('\n').length;
+                document.getElementById('line-nums').innerHTML = Array.from({length: lines}, (_, i) => i+1).join('<br>');
+                
+                // Cursor
+                const pos = document.getElementById('code-input').selectionStart;
+                const textBefore = code.substring(0, pos);
+                const line = textBefore.split('\n').length;
+                const col = textBefore.length - textBefore.lastIndexOf('\n');
+                document.getElementById('cursor-pos').innerText = `Ln ${line}, Col ${col}`;
+            },
+
+            compile() {
+                Logger.log("컴파일 중... (Analyzing AST)", "info");
+                setTimeout(() => {
+                    Logger.log("컴파일 성공!", "success");
+                    document.getElementById('deploy-btn').disabled = false;
+                    Toast.show("컴파일 완료. 배포가 가능합니다.");
+                }, 600);
+            },
+
+            deploy() {
+                const tx = VM.executeTx(25);
+                if(!tx) return Toast.show("잔액 부족!", "error");
+                
+                Logger.log(`컨트랙트 배포 성공! (Gas: ${tx.gas})`, 'success');
+                Logger.log(`TX Hash: ${tx.hash}`, 'tx');
+                
+                const data = Parser.parse(document.getElementById('code-input').value);
+                this.renderInteraction(data);
+                this.markProgress();
+            },
+
+            renderInteraction(data) {
+                const area = document.getElementById('interaction-area');
+                let html = `<div class="vm-card" style="border-color: var(--neon-cyan)">
+                    <span class="section-label" style="color: var(--neon-cyan)">${data.name.toUpperCase()} AT 0x${Math.random().toString(16).substr(2,8)}</span>`;
+                
+                data.vars.forEach(v => {
+                    if(v.viz === 'public') {
+                        html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <button class="neon-btn" style="width:100px; margin:0; border-color:var(--neon-green); color:var(--neon-green);" onclick="LabController.callView('${v.name}')">${v.name}</button>
+                            <span id="val-${v.name}" style="font-family:'Fira Code'; font-size:0.8rem;">${Parser.storage[v.name]}</span>
+                        </div>`;
+                    }
+                });
+
+                data.funcs.forEach(f => {
+                    if(f.viz === 'private') return;
+                    const isView = f.mut === 'view' || f.mut === 'pure';
+                    const color = isView ? 'var(--neon-green)' : 'var(--neon-orange)';
+                    html += `<div style="margin-bottom:10px; display:flex; gap:5px;">
+                        <button class="neon-btn" style="margin:0; border-color:${color}; color:${color};" onclick="LabController.runFunc('${f.name}', ${isView})">${f.name}</button>
+                        ${f.params ? `<input id="in-${f.name}" type="text" class="neon-btn" style="background:var(--bg-deep); text-align:left; cursor:text;" placeholder="${f.params}">` : ''}
+                    </div><div id="res-${f.name}" style="font-size:0.7rem; color:var(--text-dim); margin-top:-5px; margin-bottom:10px; padding-left:5px;"></div>`;
+                });
+
+                html += `</div>`;
+                area.innerHTML = html;
+            },
+
+            callView(name) {
+                const val = Parser.storage[name];
+                document.getElementById(`val-${name}`).innerText = val;
+                document.getElementById(`val-${name}`).style.color = 'var(--neon-cyan)';
+                Logger.log(`조회 실행: ${name} -> ${val}`, 'info');
+            },
+
+            runFunc(name, isView) {
+                if(isView) {
+                    const res = Parser.storage[name.replace('get','').toLowerCase()] || "0xNeon";
+                    document.getElementById(`res-${name}`).innerText = `↳ ${res}`;
+                    Logger.log(`Call: ${name}() 실행`, 'info');
+                } else {
+                    const tx = VM.executeTx();
+                    const input = document.getElementById(`in-${name}`);
+                    if(input && input.value) {
+                        const key = name.replace('set','').toLowerCase();
+                        Parser.storage[key] = input.value;
+                    }
+                    document.getElementById(`res-${name}`).innerText = `↳ Transaction Success (Block #${VM.block})`;
+                    Logger.log(`Tx: ${name}() 실행 (Hash: ${tx.hash.substr(0,16)}...)`, 'tx');
+                }
+            },
+
+            markProgress() {
+                let p = JSON.parse(localStorage.getItem('neon_progress')) || {};
+                p[`tab${this.currentTab}`] = true;
+                localStorage.setItem('neon_progress', JSON.stringify(p));
+                this.updateGlobalProgress();
+            },
+
+            updateGlobalProgress() {
+                const p = JSON.parse(localStorage.getItem('neon_progress')) || {};
+                const count = Object.keys(p).length;
+                const percent = (count / 3) * 100;
+                if(document.getElementById('main-progress-bar')) {
+                    document.getElementById('main-progress-bar').style.width = percent + '%';
+                    document.getElementById('progress-text').innerText = `${count}/3 Steps Completed`;
+                }
+            }
+        };
+
+        /* --- 4. Utilities --- */
+        const Logger = {
+            log(msg, type='info') {
+                const list = document.getElementById('console-list');
+                const item = document.createElement('div');
+                item.className = `log-item log-${type}`;
+                item.innerHTML = `<span style="opacity:0.5">[${new Date().toLocaleTimeString([], {hour12:false})}]</span> ${msg}`;
+                list.prepend(item);
+            }
+        };
+
+        const Toast = {
+            show(msg, type='success') {
+                const container = document.getElementById('toast-container');
+                const t = document.createElement('div');
+                t.className = `toast show`;
+                t.innerHTML = msg;
+                container.appendChild(t);
+                setTimeout(() => { t.classList.remove('show'); setTimeout(()=>t.remove(), 500); }, 3000);
+            }
+        };
+
+        const Navigation = {
+            goTo(hash) {
+                location.hash = hash;
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                document.querySelector(hash).classList.add('active');
+            }
+        };
+
+        /* --- 5. Particle Background --- */
+        const Particles = {
+            canvas: null, ctx: null, pts: [], paused: false,
+            init() {
+                this.canvas = document.getElementById('particle-canvas');
+                this.ctx = this.canvas.getContext('2d');
+                window.onresize = () => { this.canvas.width = window.innerWidth; this.canvas.height = window.innerHeight; };
+                window.onresize();
+                for(let i=0; i<60; i++) this.pts.push({ x: Math.random()*this.canvas.width, y: Math.random()*this.canvas.height, vx: Math.random()-0.5, vy: Math.random()-0.5 });
+                this.loop();
+                document.addEventListener('visibilitychange', () => this.paused = document.hidden);
+            },
+            loop() {
+                if(this.paused) { requestAnimationFrame(()=>this.loop()); return; }
+                this.ctx.clearRect(0,0,this.canvas.width, this.canvas.height);
+                this.ctx.fillStyle = 'rgba(0, 212, 255, 0.2)';
+                this.pts.forEach(p => {
+                    p.x += p.vx * 0.5; p.y += p.vy * 0.5;
+                    if(p.x < 0) p.x = this.canvas.width; if(p.x > this.canvas.width) p.x = 0;
+                    this.ctx.beginPath(); this.ctx.arc(p.x, p.y, 1, 0, 7); this.ctx.fill();
+                });
+                requestAnimationFrame(()=>this.loop());
+            }
+        };
+
+        /* --- 6. Init & Shortcuts --- */
+        window.onload = () => {
+            VM.init();
+            LabController.init();
+            Particles.init();
+            LabController.updateGlobalProgress();
+            
+            window.onkeydown = (e) => {
+                if(e.key === '1') Navigation.goTo('#lab1');
+                if(e.key === 'Escape') Navigation.goTo('#launcher');
+                if(e.ctrlKey && e.key === 'Enter') LabController.compile();
+                if(e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) LabController.deploy();
+                if(e.ctrlKey && e.key === '`') document.getElementById('bottom-console').classList.toggle('minimized');
+                if(e.ctrlKey && e.key === '/') document.getElementById('help-modal').classList.add('active');
+            };
+        };
+    </script>
+</body>
+</html>
